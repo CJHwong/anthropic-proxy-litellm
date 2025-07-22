@@ -1,0 +1,17 @@
+node_modules/
+.env
+.DS_Store
+dist/
+build/
+*.log
+*.tsbuildinfo
+.idea/
+.vscode/
+*.swp
+coverage/
+tmp/
+.cache/
+*.local
+*.pyc
+__pycache__/
+.venv/

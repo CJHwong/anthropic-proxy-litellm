@@ -1,0 +1,30 @@
+line-length = 120
+
+[lint]
+select = [
+    "I",  # pyflakes
+    "E",  # pycodestyle error
+    "F",  # Pyflakes
+    "W",  # pycodestyle warning
+    "TID", # flake8-tidy-imports
+    "UP", # enable all pyupgrade rules to modernize type annotations
+    "PYI" # type hinting related rules
+]
+ignore = [
+    "F403",  # unable to detect undefined names
+    "F405",  # may be undefined, or defined from star imports
+    "E402",  # module level import not at top of file
+    "E501",  # line too long
+    "E722",  # do not use bare `except`
+]
+
+[lint.per-file-ignores]
+"__init__.py" = [
+    "F401",  # imported but unused
+]
+
+[format]
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

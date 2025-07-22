@@ -1,0 +1,5 @@
+model_list:
+  - model_name: my-model
+    litellm_params:
+      model: github_copilot/gpt-4.1
+      extra_headers: {"Editor-Version": "Neovim/0.9.0", "Copilot-Integration-Id": "vscode-chat"}
