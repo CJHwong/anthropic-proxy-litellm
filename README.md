@@ -25,10 +25,13 @@ The script will:
 To start both the LiteLLM backend and this proxy together:
 
 ```bash
+# Specify the model with MODEL env var
+MODEL="your-model-name" ./start_servers.sh
+# Or just
 ./start_servers.sh
 ```
 
-This launches both litellm and the proxy in sequence, listening by default on ports 4000 (backend) and 3000 (proxy).
+If MODEL is not specified, the system default will be used. This launches both litellm and the proxy in sequence, listening by default on ports 4000 (backend) and 3000 (proxy).
 
 ---
 
