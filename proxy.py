@@ -28,13 +28,9 @@ if not OPENAI_API_BASE:
 
 IS_DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
 
-import yaml
-
-with open('config.yaml', 'r') as f:
-    config = yaml.safe_load(f)
-
-MODEL_CONFIGS = {m['model_name']: m['litellm_params'] for m in config.get('model_list', [])}
-DEFAULT_MODEL = 'my-model' if 'my-model' in MODEL_CONFIGS else next(iter(MODEL_CONFIGS), 'my-model')
+DEFAULT_MODEL = os.getenv('MODEL') or 'my-model'
+REASONING_MODEL = os.getenv('REASONING_MODEL') or DEFAULT_MODEL
+COMPLETION_MODEL = os.getenv('COMPLETION_MODEL') or DEFAULT_MODEL
 
 app = FastAPI()
 
@@ -148,7 +144,7 @@ async def messages_proxy(request: Request):
         ]
 
         openai_payload = {
-            'model': DEFAULT_MODEL,
+            'model': REASONING_MODEL if payload.get('thinking') else COMPLETION_MODEL,
             'messages': messages,
             'max_tokens': payload.get('max_tokens', 4096),
             'temperature': payload.get('temperature', 1.0),

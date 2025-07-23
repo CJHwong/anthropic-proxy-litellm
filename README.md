@@ -4,6 +4,40 @@ This FastAPI server acts as a proxy to translate Anthropic-format API requests (
 
 ## Usage
 
+### Model Selection: Reasoning vs. Completion
+
+The proxy supports two types of models:
+
+- **REASONING_MODEL**: Used when the request payload includes `"thinking": true`.
+- **COMPLETION_MODEL**: Default for regular completion requests.
+
+There are three environment variables for controlling model selection:
+
+- **MODEL**: Sets the default model used if neither REASONING_MODEL nor COMPLETION_MODEL are specified.
+- **REASONING_MODEL**: Used for requests with `"thinking": true` (falls back to MODEL/default if unset).
+- **COMPLETION_MODEL**: Used for standard completion requests (falls back to MODEL/default if unset).
+
+Example:
+
+```bash
+export MODEL="my-model"
+export REASONING_MODEL="claude-sonnet-4"
+export COMPLETION_MODEL="my-model"
+```
+
+If only MODEL is set, it is used for both purposes. If REASONING_MODEL or COMPLETION_MODEL are set, they override MODEL for their respective cases.
+
+In your API payload, toggle reasoning with `"thinking": true`:
+
+```json
+{
+  "messages": [...],
+  "thinking": true
+}
+```
+
+The proxy will route this request to your reasoning model.
+
 ### 1. Setup (one-time)
 
 Run the setup script to create a virtual environment and install all dependencies for both proxy and LiteLLM:
