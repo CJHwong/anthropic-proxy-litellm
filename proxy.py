@@ -148,7 +148,7 @@ async def messages_proxy(request: Request):
         ]
 
         openai_payload = {
-            'model': payload.get('model', DEFAULT_MODEL),
+            'model': DEFAULT_MODEL,
             'messages': messages,
             'max_tokens': payload.get('max_tokens', 4096),
             'temperature': payload.get('temperature', 1.0),
