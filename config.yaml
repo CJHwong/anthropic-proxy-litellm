@@ -3,3 +3,8 @@ model_list:
     litellm_params:
       model: github_copilot/gpt-4.1
       extra_headers: {"Editor-Version": "Neovim/0.9.0", "Copilot-Integration-Id": "vscode-chat"}
+  - model_name: claude-sonnet-4
+    litellm_params:
+      model: github_copilot/claude-sonnet-4
+      extra_headers: {"Editor-Version": "Neovim/0.9.0", "Copilot-Integration-Id": "vscode-chat"}
+  
