@@ -136,7 +136,7 @@ async def messages_proxy(request: Request):
                 'type': 'function',
                 'function': {
                     'name': tool['name'],
-                    'description': tool['description'],
+                    'description': tool.get('description', ''),
                     'parameters': remove_uri_format(tool['input_schema']),
                 },
             }
