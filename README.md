@@ -1,106 +1,118 @@
-# Anthropic Proxy (with LiteLLM)
+# anthropic-proxy-litellm
 
-This FastAPI server acts as a proxy to translate Anthropic-format API requests (Claude-compatible) into OpenAI-compatible requests, forwarding them to any OpenAI-style backend and remapping streamed/completed responses.
+In-process LiteLLM proxy for Anthropic-compatible API access to any LLM.
 
-## Usage
+Wraps [LiteLLM](https://github.com/BerriAI/litellm)'s proxy server in a
+Python context manager (`LiteLLMProxy`), so you can spin up an
+Anthropic-compatible endpoint in a single `with` block — no separate process,
+no shell scripts, no port management.
 
-### Model Selection: Reasoning vs. Completion
+Works with any LiteLLM-supported backend: **AWS Bedrock**, **GitHub Copilot**,
+**Ollama**, **OpenAI**, **Azure**, and
+[many more](https://docs.litellm.ai/docs/providers).
 
-The proxy supports two types of models:
-
-- **REASONING_MODEL**: Used when the request payload includes `"thinking": true`.
-- **COMPLETION_MODEL**: Default for regular completion requests.
-
-There are three environment variables for controlling model selection:
-
-- **MODEL**: Sets the default model used if neither REASONING_MODEL nor COMPLETION_MODEL are specified.
-- **REASONING_MODEL**: Used for requests with `"thinking": true` (falls back to MODEL/default if unset).
-- **COMPLETION_MODEL**: Used for standard completion requests (falls back to MODEL/default if unset).
-
-Example:
+## Install
 
 ```bash
-export MODEL="my-model"
-export REASONING_MODEL="claude-sonnet-4"
-export COMPLETION_MODEL="my-model"
+uv pip install -e .
 ```
 
-If only MODEL is set, it is used for both purposes. If REASONING_MODEL or COMPLETION_MODEL are set, they override MODEL for their respective cases.
+## Quickstart
 
-In your API payload, toggle reasoning with `"thinking": true`:
+### With Claude Agent SDK
 
-```json
-{
-  "messages": [...],
-  "thinking": true
-}
+```python
+from anthropic_proxy_litellm import LiteLLMProxy
+
+with LiteLLMProxy(config="config.yaml", model="my-model") as proxy:
+    async for msg in proxy.query("Say hello"):
+        print(msg)
 ```
 
-The proxy will route this request to your reasoning model.
+### With Claude Code CLI
 
-### 1. Setup (one-time)
+Write a script that starts the proxy and prints env vars:
 
-Run the setup script to create a virtual environment and install all dependencies for both proxy and LiteLLM:
+```python
+# start_proxy.py
+from anthropic_proxy_litellm import LiteLLMProxy
+
+models = [
+    {"model_name": "gpt-4.1", "litellm_params": {"model": "github_copilot/gpt-4.1"}},
+]
+
+with LiteLLMProxy(model_list=models, model="gpt-4.1") as proxy:
+    for key, value in proxy.env.items():
+        print(f"{key}={value}", flush=True)
+    print("", flush=True)  # blank line = ready
+
+    import signal, threading
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    try:
+        stop.wait()
+    except KeyboardInterrupt:
+        pass
+```
+
+Then drive it from a shell script:
 
 ```bash
-./setup_litellm_copilot.sh
+#!/usr/bin/env bash
+set -euo pipefail
+PIPE=$(mktemp -u); mkfifo "$PIPE"
+cleanup() { kill "$PROXY_PID" 2>/dev/null; rm -f "$PIPE"; }
+trap cleanup EXIT
+
+uv run start_proxy.py > "$PIPE" &
+PROXY_PID=$!
+
+while IFS= read -r line; do
+    [ -z "$line" ] && break
+    export "$line"
+done < "$PIPE"
+
+claude -p "Say hello"
 ```
 
-The script will:
-
-- Create and activate a Python venv
-- Install all dependencies for proxying and LiteLLM
-- Patch for Copilot debug (if used)
-- Remind you to edit `config.yaml` for LiteLLM (if custom config needed)
-- Remind you to set your `OPENAI_API_KEY` and ensure `OPENAI_API_BASE` points to the correct backend
-
-### 2. Launch services
-
-To start both the LiteLLM backend and this proxy together:
-
-```bash
-# Specify the model with MODEL env var
-MODEL="your-model-name" ./start_servers.sh
-# Or just
-./start_servers.sh
-```
-
-If MODEL is not specified, the system default will be used. This launches both litellm and the proxy in sequence, listening by default on ports 4000 (backend) and 3000 (proxy).
-
----
-
-## Inspiration & References
-
-- [[Feature]: Add GitHub Copilot as model provider](https://github.com/BerriAI/litellm/issues/6564#issuecomment-2894574403)
-- [Request: Custom Claude API Endpoint Support](https://github.com/anthropics/claude-code/issues/216#issuecomment-2765752730)
-- [maxnowack/anthropic-proxy](https://github.com/maxnowack/anthropic-proxy)
+See [`examples/copilot/`](examples/copilot/) for a complete working version.
 
 ## API
 
-- POST `/v1/messages`: Accepts Anthropic-style messages and tools payload. Returns responses in Anthropic format (sync or streamed/SSE).
-- Payloads and responses are automatically translated between protocols.
+### `LiteLLMProxy`
 
----
+| Parameter          | Env var fallback             | Description                               |
+|--------------------|------------------------------|-------------------------------------------|
+| `config`           | `LITELLM_CONFIG`             | Path to LiteLLM YAML config file          |
+| `model_list`       | —                            | List of model dicts (generates temp YAML) |
+| `port`             | `LITELLM_PORT`               | Proxy port (default: 4000)                |
+| `model`            | `ANTHROPIC_MODEL`            | Model name for SDK / env export           |
+| `small_fast_model` | `ANTHROPIC_SMALL_FAST_MODEL` | Small/fast model name (default: `model`)  |
+| `verbose`          | `LITELLM_VERBOSE`            | Enable LiteLLM debug logging              |
+| `log_requests`     | `LITELLM_LOG_REQUESTS`       | Log HTTP requests with method/path/status |
+| `env_file`         | —                            | Path to `.env` file to load               |
 
-## Example usage
+Provide exactly one of `config` or `model_list` (or set `LITELLM_CONFIG`).
 
-### Call the Anthropic API via the proxy with `curl`
+### Methods
 
-```bash
-curl -X POST "http://localhost:3000/v1/messages" \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: sk-..." \
-  -d '{
-        "model": "my-model",
-        "max_tokens": 100,
-        "messages": [
-          {"role": "user", "content": "Hello, Claude!"}
-        ]
-      }'
-```
+- **`proxy.options(**kwargs)`** — Returns a `ClaudeAgentOptions` pre-configured
+  for this proxy. Pass any SDK option as a kwarg.
+- **`proxy.query(prompt, **kwargs)`** — Async generator: sends a prompt through
+  the Claude Agent SDK and yields raw messages.
+- **`proxy.env`** — Dict of environment variables (`ANTHROPIC_BASE_URL`, etc.)
+  for passing to subprocesses.
 
-### Use Claude Code with a local proxy
+## Examples
 
-```bash
-ANTHROPIC_BASE_URL="http://localhost:3000" claude
-```
+| Directory                                              | Backend        | Proxy? | Description                                      |
+|--------------------------------------------------------|----------------|--------|--------------------------------------------------|
+| [`examples/bedrock-native/`](examples/bedrock-native/) | AWS Bedrock    | No     | Anthropic models via `CLAUDE_CODE_USE_BEDROCK=1` |
+| [`examples/bedrock/`](examples/bedrock/)               | AWS Bedrock    | Yes    | Non-Anthropic models (DeepSeek, Qwen, etc.)      |
+| [`examples/copilot/`](examples/copilot/)               | GitHub Copilot | Yes    | Inline models, proxy + `claude` CLI              |
+
+## References
+
+- [LiteLLM `/v1/messages` endpoint](https://docs.litellm.ai/docs/anthropic_unified/)
+- [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)

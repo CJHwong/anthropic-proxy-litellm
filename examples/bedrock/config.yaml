@@ -1,0 +1,36 @@
+litellm_settings:
+  set_verbose: false
+
+model_list:
+  # Non-Anthropic models on Bedrock.
+  # For Anthropic models, use CLAUDE_CODE_USE_BEDROCK=1 instead
+  # (see examples/bedrock-native/).
+
+  - model_name: deepseek.v3-v1:0
+    litellm_params:
+      model: bedrock/deepseek.v3-v1:0
+      drop_params: true
+  - model_name: moonshot.kimi-k2-thinking
+    litellm_params:
+      model: bedrock/moonshot.kimi-k2-thinking
+      drop_params: true
+  - model_name: minimax.minimax-m2
+    litellm_params:
+      model: bedrock/minimax.minimax-m2
+      drop_params: true
+  - model_name: qwen.qwen3-coder-480b-a35b-v1:0
+    litellm_params:
+      model: bedrock/qwen.qwen3-coder-480b-a35b-v1:0
+      drop_params: true
+  - model_name: qwen.qwen3-coder-30b-a3b-v1:0
+    litellm_params:
+      model: bedrock/qwen.qwen3-coder-30b-a3b-v1:0
+      drop_params: true
+  - model_name: openai.gpt-oss-120b-1:0
+    litellm_params:
+      model: bedrock/openai.gpt-oss-120b-1:0
+      drop_params: true
+  - model_name: openai.gpt-oss-20b-1:0
+    litellm_params:
+      model: bedrock/openai.gpt-oss-20b-1:0
+      drop_params: true
