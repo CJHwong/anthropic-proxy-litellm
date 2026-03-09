@@ -109,6 +109,9 @@ class LiteLLMProxy:
     """
 
     _DEFAULT_PORT = 4000
+    _PROBE_TIMEOUT = 60.0
+    _PROBE_INITIAL_INTERVAL = 1.0
+    _PROBE_MAX_INTERVAL = 5.0
     _instance_lock = threading.Lock()
 
     def __init__(
@@ -157,6 +160,7 @@ class LiteLLMProxy:
         self._server: Any = None  # uvicorn.Server, typed as Any to keep import lazy
         self._tmp_config: Path | None = None  # temp YAML created from model_list
         self._saved_config_file_path: str | None = None
+        self._started: bool = False
 
     # -- Context manager -------------------------------------------------------
 
@@ -176,10 +180,15 @@ class LiteLLMProxy:
     def start(self) -> Self:
         """Start the proxy.  Returns ``self`` for chaining.
 
+        If a healthy proxy is already listening on the configured port, this
+        instance becomes *client-only* — it exposes the same :attr:`env` and
+        :meth:`options` interface but does **not** start a uvicorn server.
+        :meth:`stop` on a client-only instance simply releases the lock.
+
         Raises ``RuntimeError`` if this instance is already started or another
         ``LiteLLMProxy`` is active in the same process.
         """
-        if self._server is not None:
+        if self._started:
             raise RuntimeError('This LiteLLMProxy is already started.')
 
         if not self._instance_lock.acquire(blocking=False):
@@ -202,6 +211,15 @@ class LiteLLMProxy:
                 self._small_fast_model_raw or os.environ.get('ANTHROPIC_SMALL_FAST_MODEL') or self._model
             )
 
+            # If a proxy is already healthy on our port, become client-only.
+            if self._probe_health():
+                logger.info(
+                    'Proxy already healthy on port %d — reusing existing server (client-only).',
+                    self._port,
+                )
+                self._started = True
+                return self
+
             self._saved_config_file_path = os.environ.get('CONFIG_FILE_PATH')
             os.environ['LITELLM_DONT_SHOW_FEEDBACK_BOX'] = 'true'
 
@@ -220,7 +238,19 @@ class LiteLLMProxy:
                 self._wait_for_proxy()
 
             logger.info('Proxy ready.')
-        except:
+            self._started = True
+        except BaseException:
+            # Clean up resources created during the failed start attempt.
+            if self._tmp_config is not None:
+                with contextlib.suppress(OSError):
+                    self._tmp_config.unlink(missing_ok=True)
+                self._tmp_config = None
+
+            if self._saved_config_file_path is not None:
+                os.environ['CONFIG_FILE_PATH'] = self._saved_config_file_path
+            else:
+                os.environ.pop('CONFIG_FILE_PATH', None)
+
             self._instance_lock.release()
             raise
 
@@ -229,27 +259,32 @@ class LiteLLMProxy:
     def stop(self) -> None:
         """Stop the proxy and clean up resources.
 
-        Safe to call when the proxy is not running (no-op).
+        Safe to call when the proxy is not running (no-op).  Client-only
+        instances (where :meth:`start` detected an existing healthy proxy)
+        skip server shutdown and only release the instance lock.
         """
-        if self._server is None:
+        if not self._started:
             return
 
         try:
-            self._shutdown_proxy()
-            self._server = None
+            if self._server is not None:
+                self._shutdown_proxy()
+                self._server = None
 
-            if self._tmp_config is not None:
-                try:
-                    self._tmp_config.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                self._tmp_config = None
+                if self._tmp_config is not None:
+                    try:
+                        self._tmp_config.unlink(missing_ok=True)
+                    except OSError:
+                        pass  # Best-effort cleanup; temp file may already be gone.
+                    self._tmp_config = None
 
-            # Restore CONFIG_FILE_PATH to its previous state.
-            if self._saved_config_file_path is not None:
-                os.environ['CONFIG_FILE_PATH'] = self._saved_config_file_path
-            else:
-                os.environ.pop('CONFIG_FILE_PATH', None)
+                # Restore CONFIG_FILE_PATH to its previous state.
+                if self._saved_config_file_path is not None:
+                    os.environ['CONFIG_FILE_PATH'] = self._saved_config_file_path
+                else:
+                    os.environ.pop('CONFIG_FILE_PATH', None)
+
+            self._started = False
         finally:
             self._instance_lock.release()
 
@@ -323,6 +358,64 @@ class LiteLLMProxy:
 
         return None
 
+    def _probe_health(self) -> bool:
+        """Check whether a proxy is already listening on our port.
+
+        Two-phase probe:
+
+        1. **Quick check** — a single request.  ``ConnectionRefusedError``
+           (nothing bound) returns ``False`` immediately so cold starts pay
+           no penalty.
+        2. **Retry loop** — entered only when the first attempt gets a
+           *non-refused* error (timeout, HTTP 503, etc.), meaning something
+           *is* listening but not yet healthy.  Retries with exponential
+           back-off (capped at ``_PROBE_MAX_INTERVAL``) until
+           ``_PROBE_TIMEOUT`` seconds have elapsed.
+        """
+        url = f'http://localhost:{self._port}/health'
+
+        # Phase 1: quick single check.
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:  # nosec B310
+                if resp.status == 200:
+                    return True
+        except OSError as e:
+            # urllib wraps socket errors: URLError(reason=ConnectionRefusedError).
+            cause = getattr(e, 'reason', e)
+            if isinstance(cause, ConnectionRefusedError):
+                return False
+            # Timeout, HTTP error, etc. — enter phase 2.
+
+        # Phase 2: something is listening; retry until healthy or deadline.
+        deadline = time.monotonic() + self._PROBE_TIMEOUT
+        interval = self._PROBE_INITIAL_INTERVAL
+        attempt = 1
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            sleep_time = min(interval, remaining)
+            logger.debug(
+                'Health probe attempt %d failed, retrying in %.1fs (%.0fs remaining)...',
+                attempt,
+                sleep_time,
+                remaining,
+            )
+            time.sleep(sleep_time)
+            interval = min(interval * 2, self._PROBE_MAX_INTERVAL)
+
+            attempt += 1
+            try:
+                with urllib.request.urlopen(url, timeout=2) as resp:  # nosec B310
+                    if resp.status == 200:
+                        return True
+            except OSError:
+                pass
+
+        return False
+
     # -- Private: proxy lifecycle ----------------------------------------------
 
     def _start_proxy(self, config_path: Path) -> Any:
@@ -377,7 +470,7 @@ class LiteLLMProxy:
             if per_req <= 0:
                 break
             try:
-                with urllib.request.urlopen(url, timeout=per_req) as resp:
+                with urllib.request.urlopen(url, timeout=per_req) as resp:  # nosec B310
                     if resp.status == 200:
                         return
             except OSError as exc:
