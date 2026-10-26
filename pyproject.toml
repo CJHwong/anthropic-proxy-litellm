@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "In-process LiteLLM proxy for Anthropic-compatible API access to any LLM"
 requires-python = ">=3.10"
 dependencies = [
+    "certifi>=2026.10.23",
     "claude-agent-sdk>=0.1.0",
     "litellm[proxy]>=1.81.6",
     "python-dotenv>=1.0.0",
